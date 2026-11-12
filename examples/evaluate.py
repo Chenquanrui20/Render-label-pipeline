@@ -240,6 +240,9 @@ def main(argv=None):
                             "mean": float(np.mean(diff_med))},
             "diff_mean": {"median": float(np.median(diff_mean)),
                           "mean": float(np.mean(diff_mean))},
+            # the raw trial values, so a plot can show the whole distribution
+            "trial_median_values": [round(float(x), 4) for x in tm],
+            "trial_mean_values": [round(float(x), 4) for x in tmean],
         }
     else:
         out["random"] = {"trials": a.trials, "note": "no trial produced an observation"}

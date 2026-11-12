@@ -64,3 +64,7 @@ python3 examples/check_stages.py --scene "$SCENE" \
   [`../demo_results.md`](../demo_results.md)。demo 默认不按结果调参。
 
 参考运行的汇总见 [`../demo_results.md`](../demo_results.md)。
+
+图册与演示视频：`work/gallery/report.html`、`work/gallery/demo.mp4`
+（由 `visualize.py` / `make_demo_video.py` 生成，命令见
+[`../README.md`](../README.md#图册与演示视频)）。
