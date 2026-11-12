@@ -18,18 +18,25 @@ import numpy as np
 
 
 def _from_message(d):
-    """One message dict -> view dict (with consistency checks)."""
+    """One message dict -> view dict (with consistency checks).
+
+    `T_world2cam` may be omitted when the camera centre is present: it is exactly
+    ``-R @ C``, so a message that only stores the centre is still unambiguous.
+    """
     R = np.asarray(d["R_world2cam"], np.float64)
-    t = np.asarray(d["T_world2cam"], np.float64).reshape(3)
     C = np.asarray(d["camera_center_world"], np.float64)
     if "R_cam2world" in d:
         err_R = float(np.abs(np.asarray(d["R_cam2world"]).T - R).max())
         if err_R > 1e-6:
             raise ValueError("%s: R_cam2world.T != R_world2cam (%.2e)"
                              % (d.get("image_name", "?"), err_R))
-    err_t = float(np.abs(-R @ C - t).max())
-    if err_t > 1e-5:
-        raise ValueError("%s: tvec != -R @ C (%.2e)" % (d.get("image_name", "?"), err_t))
+    if d.get("T_world2cam") is not None:
+        t = np.asarray(d["T_world2cam"], np.float64).reshape(3)
+        err_t = float(np.abs(-R @ C - t).max())
+        if err_t > 1e-5:
+            raise ValueError("%s: tvec != -R @ C (%.2e)" % (d.get("image_name", "?"), err_t))
+    else:
+        t = -R @ C
     return dict(image=d["image_name"],
                 render_file=d.get("render_file", d["image_name"] + ".png"),
                 R=R, t=t, C=C,

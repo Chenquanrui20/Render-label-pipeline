@@ -14,6 +14,11 @@ labels/
 *.ply
 *.db
 
+# demo staging dirs (symlinks into a local dataset)
+examples/*/scene/
+# demo run outputs (regenerate with run_demo.sh; demo_results.md is committed)
+examples/*/work*/
+
 # editor / OS
 .vscode/
 .idea/

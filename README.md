@@ -130,6 +130,25 @@ A label is written only for frames where the point actually projects inside the
 image. `summary.json` reports, per point, how many annotated views were used and
 in how many frames the label exists.
 
+## Demos on real data
+
+Two end-to-end demos run steps 04–07 on real render sets that ship with the
+paper's data, and score the result against independent labels and ground-truth
+3D points:
+
+| demo | data | frames | points | command |
+|---|---|---|---|---|
+| ArUco | ChArUco board, `train/0000` | 946 | 15 | `SCENE=... bash examples/charuco/run_demo.sh` |
+| YCBV | `seq00_room_20261012` | 1000 | 19 | `SCENE=... bash examples/ycbv/run_demo.sh` |
+
+The only simulated part is the GUI click: `examples/make_clicks.py` copies the
+dataset's existing render-domain labels (ArUco detections; YCBV optical-flow
+labels) into the annotator's JSON format. Steps 05–07 and the evaluation are
+the real pipeline. Each demo reports the held-out 2D error (frames that never
+contributed a click), a random-view baseline at the same budget, and the 3D
+error against ground truth after a Sim(3) leave-one-out fit. See
+[examples/README.md](examples/README.md).
+
 ## The selection rule
 
 Nothing in steps 04–05 looks at a 2D observation before the seed clicks:
