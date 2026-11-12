@@ -1,0 +1,15 @@
+# conda env for the label side (COLMAP subset, selection, annotation, triangulation)
+#   conda env create -f environment.yml
+#   conda activate rlabel
+# The 3DGS side needs a separate env with torch + the gaussian-splatting repo;
+# see docs/02_train_3dgs.md.
+name: rlabel
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - numpy>=1.23
+  - scipy>=1.9
+  - opencv
+  - pillow
+  - pycolmap>=0.6

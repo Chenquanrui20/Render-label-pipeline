@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# pipeline outputs (never commit a dataset)
+work/
+3dgs/
+renders/
+overlay/
+labels/
+*.ply
+*.db
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store

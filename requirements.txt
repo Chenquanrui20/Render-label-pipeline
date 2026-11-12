@@ -1,0 +1,6 @@
+# label side only (the 3DGS side follows docs/02_train_3dgs.md)
+numpy>=1.23
+scipy>=1.9
+opencv-python>=4.6
+pillow>=9.0
+pycolmap>=0.6
