@@ -29,7 +29,7 @@ def _pycolmap():
     return pycolmap
 
 
-def select_names(pycolmap, rec, n):
+def select_names(rec, n):
     names = sorted(im.name for im in rec.images.values())
     if n >= len(names):
         return names
@@ -118,7 +118,20 @@ def run(a):
     dst = a.out or os.path.join(scene_dir, "3dgs")
     tmp = dst + ".tmp"
 
-    rec = pycolmap.Reconstruction(src_model)
+    try:
+        rec = pycolmap.Reconstruction(src_model)
+    except IndexError as e:
+        # pycolmap >= 4 rejects a points3D track that names a missing image,
+        # which usually means the model was edited by hand or stitched
+        # together from two reconstructions.
+        raise SystemExit(
+            "could not load %s: %s\n"
+            "This COLMAP model is inconsistent: a points3D track references an "
+            "image id that is not in images.bin (a hand-edited or stitched "
+            "model). pycolmap >= 4 refuses to load it; pycolmap 3.x tolerates "
+            "it. Re-run the reconstruction, rebuild the model so images.bin "
+            "and points3D.bin come from the same run, or run this stage in an "
+            "environment with pycolmap<4." % (src_model, e))
     print("[%s] source: %d images, %d cameras, %d points3D"
           % (os.path.basename(scene_dir), rec.num_images(), rec.num_cameras(),
              rec.num_points3D()))
@@ -127,7 +140,7 @@ def run(a):
         missing = [k for k in keep if k not in {im.name for im in rec.images.values()}]
         assert not missing, "frames not in the COLMAP model: %s" % missing[:5]
     else:
-        keep = select_names(pycolmap, rec, a.n)
+        keep = select_names(rec, a.n)
     print("  selected %d frames: %s .. %s" % (len(keep), keep[0], keep[-1]))
     if a.dry:
         return 0

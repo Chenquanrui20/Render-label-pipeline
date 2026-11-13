@@ -61,10 +61,14 @@ python3 examples/check_stages.py --scene "$SCENE" \
 * 另一个点 `kp14` 只有 2 次点击，残差 7.6 px，留出集误差中位 9.3 px——两点
   交会没有多余观测可以拒绝坏点。用 `MIN_VIEWS=3` 可以把这类点剔除，但池化
   指标不会因此变好（同时会剔掉几个本来不错的 2 点），见
-  [`../demo_results.md`](../demo_results.md)。demo 默认不按结果调参。
+  [`../demo_results.md`](../demo_results.md)。demo 默认不按结果调参；只有
+  演示视频为了好看不画残差 >5 px 的点（就是这个 `kp14`），评测口径不变。
 
 参考运行的汇总见 [`../demo_results.md`](../demo_results.md)。
 
 图册与演示视频：`work/gallery/report.html`、`work/gallery/demo.mp4`
 （由 `visualize.py` / `make_demo_video.py` 生成，命令见
-[`../README.md`](../README.md#图册与演示视频)）。
+[`../README.md`](../README.md#图册与演示视频)）。所有叠加图里绿圈＝当前帧
+可见的投影标签，灰色空心圈＝被遮挡/无参考标签的点，黄色十字＝数据集参考
+标签。视频的投影段只取“标签一致度接近序列中位数”的一整段连续帧——YCBV 的
+光流参考标签在序列尾段会漂到 ~7 px，那段不进演示。

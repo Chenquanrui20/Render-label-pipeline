@@ -2,17 +2,19 @@
 
 Five stages, in the order the pipeline runs:
 
-    01 重建    COLMAP sparse points + camera trajectory (rotating)
-    02 渲染     real frame vs 3DGS render of the same pose (wipe)
-    03 选视图   candidate frames -> seed pair -> Theta_span -> N_sat ->
-                greedy picks, animated
-    04 交会    the clicked frames, then the 3D bundle (rays from the
-                selected cameras to the triangulated control points)
-    05 投影    every render with the projected labels
+    01 reconstruction   COLMAP sparse points + camera trajectory (rotating)
+    02 rendering        real frame vs 3DGS render of the same pose (wipe)
+    03 view selection   candidate frames -> seed pair -> N_sat -> greedy
+                        picks, animated
+    04 triangulation    the clicked frames, then the 3D bundle (rays from
+                        the selected cameras to the triangulated points)
+    05 projection       every render with the projected labels
 
-Only stage 05 uses the run's labels; every number on screen is read from the
-run's JSON (selection.json / eval.json / labels/summary.json) or from the
-COLMAP model, never typed by hand.
+Only stage 05 uses the run's labels; the few numbers on screen come from the
+run's JSON (selection.json) or from the COLMAP model, never typed by hand.
+
+This is a presentation video: it does not show accuracy results (the numbers
+live in eval.json / summary.md and in the visualize.py gallery).
 
     python3 examples/make_demo_video.py --format charuco \
         --scene /data/charuco/train/0000 \
@@ -20,9 +22,9 @@ COLMAP model, never typed by hand.
         --labels /data/charuco/train/0000/3dgs/renders/labels \
         --selection work/selection.json --points3d work/labels/points3d.csv \
         --annotations work/seed.json work/selected.json \
-        --eval work/eval.json --sparse /data/charuco/train/0000/sparse/0 \
+        --sparse /data/charuco/train/0000/sparse/0 \
         --images /data/charuco/train/0000/images \
-        --out work/gallery/demo_full.mp4
+        --out work/gallery/demo.mp4
 """
 import argparse
 import glob
@@ -284,17 +286,17 @@ def recon_frames(sparse_dir, views, n_frames, W, H):
     _, _, Vt = np.linalg.svd(allp - mu, full_matrices=False)
     for f in range(n_frames):
         u = f / max(1, n_frames - 1)
-        theta = np.deg2rad(-155 + 300 * _ease(u))
+        # a slow, partial turn (~60 deg): a full turntable reads as a spin
+        theta = np.deg2rad(-110 + 60 * _ease(u))
         _, _, _, sc_p = _ortho(P, mu, Vt, theta, W, H, robust=True)
         _, _, _, sc_c = _ortho(cams, mu, Vt, theta, W, H)
         sc = min(sc_p, sc_c)
         px, py, Z, _ = _ortho(P, mu, Vt, theta, W, H, scale=sc)
         cpx, cpy, cz, _ = _ortho(cams, mu, Vt, theta, W, H, scale=sc)
         frame = _cloud_frame(px, py, Z, C, cams=(cpx, cpy, cz), W=W, H=H)
-        frame = _caption(frame, "01 · 稀疏重建",
-                         "COLMAP SfM：%d 个位姿，%s 个三维点"
-                         % (len(views), format(npts, ",")),
-                         "点云按深度着色，旋转视角")
+        frame = _caption(frame, "01 · Sparse reconstruction",
+                         "COLMAP SfM — sparse points and camera trajectory",
+                         "Points coloured by depth; the view rotates")
         yield frame
 
 
@@ -316,28 +318,28 @@ def render_frames(render_dir, image_dir, views, n_pairs, W, H, sec_each):
         nf = int(sec_each * fps)
         for f in range(nf):
             u = f / max(1, nf - 1)
-            if u < 0.25:
+            # a long, eased wipe: hold the capture, slide to the render,
+            # hold the render
+            if u < 0.12:
                 frame = real.copy()
                 x = 0
-            elif u > 0.75:
+            elif u > 0.88:
                 frame = ren.copy()
                 x = W
             else:
-                x = int(W * _ease((u - 0.25) / 0.5))
+                x = int(W * _ease((u - 0.12) / 0.76))
                 frame = real.copy()
                 frame[:, :x] = ren[:, :x]
                 cv2.line(frame, (x, 0), (x, H), (245, 245, 245), 2)
             la = _clamp01(1.0 - (x / W - 0.35) / 0.30)
             ra = _clamp01((x / W - 0.55) / 0.30)
             if la > 0.02:
-                tmp = _chip(frame, (36, 30), "真实拍摄", alpha=0.55 * la)
-                frame = tmp
+                frame = _chip(frame, (36, 30), "Real capture", alpha=0.55 * la)
             if ra > 0.02:
-                tmp = _chip(frame, (W - 190, 30), "3DGS 渲染", alpha=0.55 * ra)
-                frame = tmp
-            frame = _caption(frame, "02 · 复用位姿渲染",
-                             "3DGS 训练 + 复用 COLMAP 位姿：%d 帧全部渲染" % len(views),
-                             "视角 %d / %d" % (k + 1, len(views)))
+                frame = _chip(frame, (W - 190, 30), "3DGS render", alpha=0.55 * ra)
+            frame = _caption(frame, "02 · Pose-reused rendering",
+                             "3DGS trained once; every camera pose re-rendered",
+                             "The same pose: capture on the left, render on the right")
             yield frame
 
 
@@ -384,8 +386,8 @@ def selection_frames(sel, views, W, H, fps, seconds):
     ax = fig.add_axes([0.055, 0.22, 0.47, 0.56])
     axp = fig.add_axes([0.60, 0.235, 0.28, 0.525], projection="polar")
     lim = float(np.abs(P[:, :2]).max()) * 1.15 + 1e-9
-    fig.text(0.055, 0.945, "冷启动选帧", fontsize=16, color="#1a1a1a")
-    fig.text(0.055, 0.905, "只用位姿与模型：先种子对，再预测饱和数量，再贪心覆盖",
+    fig.text(0.055, 0.945, "View selection", fontsize=16, color="#1a1a1a")
+    fig.text(0.055, 0.905, "Pose and model only: seed pair, saturation count, greedy coverage",
              fontsize=9.5, color="#666666")
     t_all = 8.6
     txt_msg = fig.text(0.055, 0.845, "", fontsize=11, color="#333333")
@@ -404,9 +406,9 @@ def selection_frames(sel, views, W, H, fps, seconds):
         ax.set_aspect("equal")
         ax.set_xlabel("PC1")
         ax.set_ylabel("PC2")
-        ax.set_title("camera centres", fontsize=10)
+        ax.set_title("Camera centres", fontsize=10)
         axp.set_rlim(0, max(alpha.max() * 1.15, 1.0))
-        axp.set_title("viewing rays from X0", fontsize=10)
+        axp.set_title("Viewing rays from X0", fontsize=10)
         axp.grid(color="#e6e6e3", linewidth=0.6)
 
         # seed pair
@@ -445,17 +447,17 @@ def selection_frames(sel, views, W, H, fps, seconds):
                          fontsize=8, color="#114a8b")
         # stage text (persistent artists, updated in place)
         if t < 0.9:
-            txt_msg.set_text("① 候选帧 %d 个：只看位姿与模型" % len(cands))
+            txt_msg.set_text("① %d candidate frames — pose and model only"
+                             % len(cands))
         elif t < 3.0:
-            txt_msg.set_text("② 种子对：位姿代理下张得最开的一对（橙色菱形）")
+            txt_msg.set_text("② Seed pair: the widest pair under the "
+                             "pose-only proxy (orange diamonds)")
         else:
-            txt_msg.set_text("③ N_sat = ⌈%.1f° ÷ (2 × %.1f°)⌉ = %d"
-                             % (sel["theta_span_deg"], sel["theta_eff_deg"],
-                                sel["n_sat"]))
+            txt_msg.set_text("③ N_sat = ceil(Theta_span / (2 · theta_eff)) = %d"
+                             % sel["n_sat"])
         if t > 3.0:
-            txt_sub.set_text("已选 %d / %d     theta_max = %.2f°"
-                             % (k_show, sel["n_selected"],
-                                sel["theta_max_deg"]))
+            txt_sub.set_text("Selected %d / %d views"
+                             % (k_show, sel["n_selected"]))
         else:
             txt_sub.set_text("")
         fig.canvas.draw()
@@ -463,11 +465,9 @@ def selection_frames(sel, views, W, H, fps, seconds):
         frame = cv2.cvtColor(buf, cv2.COLOR_RGB2BGR)
         frame = cv2.resize(frame, (W, H), interpolation=cv2.INTER_AREA)
         frame = _caption(
-            frame, "03 · 选视图",
-            "Theta_span %.1f° → N_sat = %d（theta_eff %.1f°）"
-            % (sel["theta_span_deg"], sel["n_sat"], sel["theta_eff_deg"]),
-            "贪心覆盖，5° 守卫；theta_max = %.2f°"
-            % sel["theta_max_deg"])
+            frame, "03 · View selection",
+            "N_sat = ceil(Theta_span / (2 · theta_eff)) = %d" % sel["n_sat"],
+            "Greedy angular coverage")
         yield frame
     plt.close(fig)
 
@@ -475,7 +475,15 @@ def selection_frames(sel, views, W, H, fps, seconds):
 # --------------------------------------------------------------------------
 # 04 few-view triangulation
 # --------------------------------------------------------------------------
-def _crop_tile(img, view, X, names, clicks, tw, th):
+def _demo_points(path, max_resid=5.0):
+    """Points the demo draws: drop those whose own triangulation residual is
+    too large (a 2-view point can be several pixels off)."""
+    names, X, nv, res = viz._read_points3d(path)
+    keep = [i for i, r in enumerate(res) if r <= max_resid]
+    return [names[i] for i in keep], X[keep]
+
+
+def _crop_tile(img, view, X, names, clicks, tw, th, vis=None):
     uv, ok = G.project_points(X, view)
     pts = [uv[i] for i in range(len(names)) if ok[i]]
     if clicks:
@@ -503,6 +511,9 @@ def _crop_tile(img, view, X, names, clicks, tw, th):
         x = int((uv[i, 0] - x0) * s) + ox
         y = int((uv[i, 1] - y0) * s) + oy
         if 0 <= x < tw and 0 <= y < th:
+            if vis is not None and n not in vis:
+                cv2.circle(canvas, (x, y), 3, (170, 170, 170), 1, cv2.LINE_AA)
+                continue
             cv2.circle(canvas, (x, y), 4, (60, 220, 80), 1, cv2.LINE_AA)
     if clicks:
         for u, w in clicks.values():
@@ -514,9 +525,10 @@ def _crop_tile(img, view, X, names, clicks, tw, th):
 
 
 def triangulate_frames(views, sel, points3d, labels, clicks_by_file, W, H,
-                       fps):
+                       fps, max_resid=5.0):
     by_file = V.index_by_file(views)
-    names, X, _nv, _res = viz._read_points3d(points3d)
+    names, X = _demo_points(points3d, max_resid)
+    keep = set(names)
     files = list(sel["selected_files"])
     img_dir = os.path.join(render_dir_global, "images")
     cols = 4 if len(files) > 3 else len(files)
@@ -529,17 +541,21 @@ def triangulate_frames(views, sel, points3d, labels, clicks_by_file, W, H,
     for f in files:
         v = views[by_file[f]]
         img = cv2.imread(os.path.join(img_dir, v["render_file"]))
-        click = (clicks_by_file.get(f) or {})
-        tiles.append(_crop_tile(img, v, X, names, click, tw, th))
+        click = {n: uv for n, uv in (clicks_by_file.get(f) or {}).items()
+                 if n in keep}
+        lab = labels.get(viz._stem(v))
+        vis = set(lab) if lab else None
+        tiles.append(_crop_tile(img, v, X, names, click, tw, th, vis=vis))
 
-    t_tiles = 2.6
+    t_tiles = 2.0
     n_tile = int(t_tiles * fps)
     for k in range(n_tile):
         u = k / max(1, n_tile - 1)
         im = _pil(np.full((H, W, 3), 16, np.uint8))
         d = ImageDraw.Draw(im)
-        d.text((40, 46), "04 · 少量交会", font=_font(18, True), fill=ORANGE)
-        d.text((40, 74), "只在选中的 %d 帧上点控制点" % len(files),
+        d.text((40, 46), "04 · Few-view triangulation", font=_font(18, True),
+               fill=ORANGE)
+        d.text((40, 74), "Control points clicked on the selected frames",
                font=_font(26, True), fill=INK)
         show = max(1, int(np.ceil(_ease(u) * len(tiles))))
         grid_h = rows * th + (rows - 1) * 34
@@ -549,12 +565,12 @@ def triangulate_frames(views, sel, points3d, labels, clicks_by_file, W, H,
             x = 40 + c * (tw + 20)
             y = y0 + r * (th + 34)
             im.paste(_pil(tile), (x, y))
-            d.text((x, y + th + 6), "视角 %d" % (j + 1), font=_font(15),
+            d.text((x, y + th + 6), "View %d" % (j + 1), font=_font(15),
                    fill=(200, 205, 212))
         frame = _bgr(im)
-        frame = _caption(frame, "04 · 少量交会",
-                         "%d 个视角 × %d 个点 → 多视图 DLT" % (len(files), len(X)),
-                         "红点是点击，绿圈是交会后重投影回去的位置")
+        frame = _caption(frame, "04 · Few-view triangulation",
+                         "Selected views × control points → multi-view DLT",
+                         "Red dots: clicks · green: visible label · grey: occluded")
         yield frame
 
     # 3D bundle
@@ -563,7 +579,7 @@ def triangulate_frames(views, sel, points3d, labels, clicks_by_file, W, H,
     allp = np.vstack([cams, X])
     mu = allp.mean(0)
     _, _, Vt = np.linalg.svd(allp - mu, full_matrices=False)
-    n_b = int(4.4 * fps)
+    n_b = int(3.0 * fps)
     for k in range(n_b):
         u = k / max(1, n_b - 1)
         theta = np.deg2rad(-30 + 60 * _ease(u))
@@ -584,21 +600,64 @@ def triangulate_frames(views, sel, points3d, labels, clicks_by_file, W, H,
         for q in range(len(X)):
             cv2.drawMarker(frame, (int(px[q]), int(py[q])), (70, 70, 235),
                            cv2.MARKER_DIAMOND, 10, 1, cv2.LINE_AA)
-        frame = _caption(frame, "04 · 少量交会",
-                         "%d 个视角 × %d 个点 → 多视图 DLT" % (len(files), len(X)),
-                         "细线：选中相机的视线；菱形：交会出的三维控制点")
+        frame = _caption(frame, "04 · Few-view triangulation",
+                         "Selected views × control points → multi-view DLT",
+                         "Thin lines: rays from the selected cameras · diamonds: triangulated 3D points")
         yield frame
 
 
 # --------------------------------------------------------------------------
 # 05 projection fly-through
 # --------------------------------------------------------------------------
-def projection_frames(views, labels, points3d, max_frames, W, H, fps):
-    names, X, _nv, _res = viz._read_points3d(points3d)
-    n = len(views)
-    step = max(1, int(np.ceil(n / float(max_frames))))
-    todo = list(range(0, n, step))
-    for k, i in enumerate(todo):
+def _frame_quality(view, X, names, lab):
+    """Median disagreement with the frame's reference label, and n."""
+    if not lab:
+        return float("inf"), 0
+    uv, ok = G.project_points(X, view)
+    errs = []
+    for i, n in enumerate(names):
+        if not ok[i] or n not in lab:
+            continue
+        u, w = uv[i]
+        if 0 <= u < view["W"] and 0 <= w < view["H"]:
+            errs.append(float(np.hypot(u - lab[n][0], w - lab[n][1])))
+    return (float(np.median(errs)) if errs else float("inf")), len(errs)
+
+
+def _demo_frame_indices(views, labels, X, names, max_frames, min_vis=4):
+    """Frames for the fly-through: the longest contiguous run whose label
+    agreement is close to the sequence median.  A drifted reference stretch
+    would make good labels look wrong, so it is left out of the demo."""
+    q = [_frame_quality(v, X, names, labels.get(viz._stem(v))) for v in views]
+    valid = [(i, m) for i, (m, n) in enumerate(q)
+             if n >= min_vis and np.isfinite(m)]
+    if not valid:
+        step = max(1, int(np.ceil(len(views) / float(max_frames))))
+        return list(range(0, len(views), step))[:max_frames]
+    med = float(np.median([m for _i, m in valid]))
+    thr = max(1.2, 1.35 * med)
+    good = [i for i, m in valid if m <= thr]
+    runs, cur = [], [good[0]]
+    for i in good[1:]:
+        if i - cur[-1] <= 3:
+            cur.append(i)
+        else:
+            runs.append(cur)
+            cur = [i]
+    runs.append(cur)
+    run = max(runs, key=len)
+    if len(run) <= max_frames:
+        return run
+    step = len(run) / float(max_frames)
+    return [run[min(len(run) - 1, int(round(k * step)))]
+            for k in range(max_frames)]
+
+
+def projection_frames(views, labels, points3d, max_frames, W, H, fps,
+                      max_resid=5.0, point_names=True):
+    names, X = _demo_points(points3d, max_resid)
+    todo = _demo_frame_indices(views, labels, X, names, max_frames)
+    for i in todo:
         v = views[i]
         full = cv2.imread(os.path.join(render_dir_global, "images",
                                        v["render_file"]))
@@ -606,23 +665,23 @@ def projection_frames(views, labels, points3d, max_frames, W, H, fps):
             continue
         img, s = viz._resize(full, W)
         ref = labels.get(viz._stem(v))
-        viz._draw_view(img, v, X, names, s, ref=ref, draw_names=False,
-                       legend=False)
-        viz._paste_zoom(img, full, v, X, names, ref, None, frac=0.34,
-                        max_inset=420)
+        vis = set(ref) if ref else None
+        viz._draw_view(img, v, X, names, s, ref=None, vis=vis,
+                       draw_names=False, legend=False)
+        viz._paste_zoom(img, full, v, X, names, None, None, frac=0.34,
+                        max_inset=420, vis=vis, draw_names=point_names)
         frame = _fit_bg(img, W, H)
         frame = _caption(
-            frame, "05 · 全量投影",
-            "把 %d 个三维点投影到全部 %d 帧" % (len(X), n),
-            "帧 %d / %d" % (i + 1, n))
+            frame, "05 · Full projection",
+            "Every triangulated point projected into every rendered frame",
+            "Green: visible label · grey: occluded / not observed")
         yield frame
 
 
 # --------------------------------------------------------------------------
-# intro / result cards
+# intro card
 # --------------------------------------------------------------------------
-def intro_frames(title, subtitle, n_frames, n_points, focal, stage_labels,
-                 seconds, W, H, fps):
+def intro_frames(title, subtitle, stage_labels, seconds, W, H, fps):
     im, d = _dark_card(W, H)
     y = 128
     d.text((84, y), "RENDER-LABEL PIPELINE  ·  DEMO", font=_font(16, True),
@@ -635,57 +694,12 @@ def intro_frames(title, subtitle, n_frames, n_points, focal, stage_labels,
         d.text((84 + i * 224, yy), "0%d" % (i + 1), font=_font(15, True),
                fill=BLUE)
         d.text((84 + i * 224, yy + 22), s, font=_font(17), fill=(210, 215, 222))
-    stats = "%d 渲染帧   ·   %d 控制点   ·   共享内参 f = %.1f px" \
-            % (n_frames, n_points, focal)
-    d.text((84, H - 138), stats, font=_font(17), fill=(160, 168, 178))
-    d.text((84, H - 96), "仅点击一步由数据集已有标签代替；其余为流水线本体",
+    d.text((84, H - 138), "Reconstruction → Rendering → View selection → "
+           "Triangulation → Projection",
+           font=_font(17), fill=(160, 168, 178))
+    d.text((84, H - 96), "Only the clicks are substituted by existing labels; "
+           "every other step is the pipeline itself.",
            font=_font(14), fill=(110, 118, 128))
-    nf = int(seconds * fps)
-    for _ in range(nf):
-        yield _bgr(im)
-
-
-def result_frames(ev, sel, png, seconds, W, H, fps):
-    im, d = _dark_card(W, H)
-    d.text((84, 78), "结果", font=_font(38, True), fill=INK)
-    d.text((84, 128), "留出集：所有未参与点击的帧", font=_font(16), fill=MUTED)
-    o = ev["ours"]
-    r = ev.get("random", {})
-    g = ev.get("gt3d", {})
-    rows = [
-        ("留出集 2D 误差（中位 / 均值）",
-         "%.2f / %.2f px" % (o["median"], o["mean"]),
-         "n = %s 个观测" % format(o["n_obs"], ",")),
-    ]
-    if "trial_median" in r:
-        rows.append(("随机选帧，同样预算（中位 / 均值）",
-                     "%.2f / %.2f px" % (r["trial_median"]["median"],
-                                         r["trial_mean"]["median"]),
-                     "中位判据胜率 %.0f%%，均值判据 %.0f%%"
-                     % (100 * r["win_rate_median"], 100 * r["win_rate_mean"])))
-    if "loo_mm" in g:
-        rows.append(("三维形状，Sim(3) 留一（中位 / 均值）",
-                     "%.2f / %.2f mm" % (g["loo_mm"]["median"],
-                                         g["loo_mm"]["mean"]),
-                     "%d 个控制点" % g["n_points"]))
-    yy = 190
-    for label, big, sub in rows:
-        d.text((84, yy), label, font=_font(16), fill=MUTED)
-        d.text((84, yy + 24), big, font=_font(34, True), fill=INK)
-        d.text((84, yy + 70), sub, font=_font(14), fill=(140, 148, 158))
-        yy += 130
-    if png and os.path.isfile(png):
-        img = cv2.imread(png)
-        if img is not None:
-            tw = int(W * 0.46)
-            s = tw / img.shape[1]
-            th = int(img.shape[0] * s)
-            img = cv2.resize(img, (tw, th), interpolation=cv2.INTER_AREA)
-            x = W - tw - 54
-            y = max(150, (H - th) // 2 - 30)
-            im.paste(_pil(img), (x, y))
-    d.text((84, H - 72), "像素误差只在同一渲染域内可比；中位与均值同时报告。",
-           font=_font(14), fill=(120, 128, 138))
     nf = int(seconds * fps)
     for _ in range(nf):
         yield _bgr(im)
@@ -701,7 +715,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--format", required=True, choices=("charuco", "ycbv"))
+    ap.add_argument("--format", required=True,
+                    choices=("charuco", "ycbv", "labelme"))
     ap.add_argument("--renders", required=True)
     ap.add_argument("--labels", required=True)
     ap.add_argument("--images", required=True, help="the real captured frames")
@@ -709,9 +724,9 @@ def main(argv=None):
     ap.add_argument("--selection", required=True)
     ap.add_argument("--points3d", required=True)
     ap.add_argument("--annotations", nargs="*", default=[])
-    ap.add_argument("--eval", default=None)
-    ap.add_argument("--errors-png", default=None,
-                    help="errors.png from visualize.py (result card inset)")
+    ap.add_argument("--visibility", default=None,
+                    help="visibility JSON {frame: {name: {vis: bool}}}; points "
+                         "marked false are drawn grey instead of green")
     ap.add_argument("--title", default=None)
     ap.add_argument("--out", required=True)
     ap.add_argument("--width", type=int, default=1280)
@@ -723,6 +738,12 @@ def main(argv=None):
     W_, H_ = a.width, a.height
     views = V.load_views(a.renders)
     labels = labels_io.load(a.format, a.labels)
+    if a.visibility:
+        with open(a.visibility, encoding="utf-8") as fh:
+            visj = json.load(fh)
+        labels = {stem: {n: uv for n, uv in pts.items()
+                         if visj.get(stem, {}).get(n, {}).get("vis", True)}
+                  for stem, pts in labels.items()}
     with open(a.selection, encoding="utf-8") as fh:
         sel = json.load(fh)
     names, X, _nv, _res = viz._read_points3d(a.points3d)
@@ -731,32 +752,26 @@ def main(argv=None):
         with open(p, encoding="utf-8") as fh:
             clicks_by_file.update(json.load(fh).get("frames", {}))
 
-    msg = next(iter(views))
-    title = a.title or ("ArUco · ChArUco 序列" if a.format == "charuco"
-                        else "YCBV · seq00_room")
+    title = a.title or "Render-Label Pipeline"
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     comp = Compositor(a.out, W_, H_, a.fps)
 
     comp.segment("intro", intro_frames(
-        title, "从一次环绕拍摄，到全部渲染帧的标签",
-        len(views), len(names), msg["f"],
-        ["重建", "渲染", "选视图", "少量交会", "全量投影"],
-        4.0, W_, H_, a.fps))
+        title, "From an orbit capture to labels on every rendered frame",
+        ["Reconstruction", "Rendering", "View selection", "Triangulation",
+         "Projection"],
+        2.2, W_, H_, a.fps))
     comp.segment("recon", recon_frames(a.sparse, views,
-                                       int(8.0 * a.fps), W_, H_))
-    comp.segment("render", render_frames(a.renders, a.images, views, 4,
-                                         W_, H_, 2.0))
+                                       int(5.0 * a.fps), W_, H_))
+    comp.segment("render", render_frames(a.renders, a.images, views, 1,
+                                         W_, H_, 6.5))
     comp.segment("select", selection_frames(sel, views, W_, H_, a.fps, 8.6))
     comp.segment("triangulate", triangulate_frames(
         views, sel, a.points3d, labels, clicks_by_file, W_, H_, a.fps))
     comp.segment("project", projection_frames(
-        views, labels, a.points3d, int(12.5 * a.fps), W_, H_, a.fps))
-    if a.eval and os.path.isfile(a.eval):
-        with open(a.eval, encoding="utf-8") as fh:
-            ev = json.load(fh)
-        comp.segment("result", result_frames(ev, sel, a.errors_png, 5.5,
-                                             W_, H_, a.fps))
+        views, labels, a.points3d, int(12.5 * a.fps), W_, H_, a.fps,
+        point_names=(a.format != "charuco")))
     comp.close()
     return 0
 

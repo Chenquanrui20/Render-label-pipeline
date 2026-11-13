@@ -12,7 +12,9 @@ old, upgrade it or run the stage commands directly.
 
 **`pycolmap` import fails.**
 It is only needed for `subset` (step 02). Install it in the label env:
-`conda install -c conda-forge pycolmap`. There is no pip wheel on all platforms.
+`pip install pycolmap` (wheels exist for recent Linux/macOS Pythons; tested
+4.2.1 on Python 3.11) or `conda install -c conda-forge pycolmap` (tested 4.1.1
+on Python 3.10). On platforms without a wheel, use conda-forge.
 
 **`could not load library libcudart.so`** when starting 3DGS training.
 The torch wheel and the system CUDA runtime disagree. Install the torch wheel
@@ -49,6 +51,16 @@ texture. Try `MATCHER=exhaustive`. Check `colmap model_analyzer`.
 
 **COLMAP wrote `sparse/1` instead of `sparse/0`.**
 Several disjoint models. Keep the largest and rename it to `sparse/0`.
+
+**`subset` fails with `IndexError: Image with ID ... does not exist`.**
+The model is inconsistent: a `points3D` track names an image id that is not in
+`images.bin`. That happens when `images.bin` was rewritten (frames removed) and
+`points3D.bin` was left from the full run, or when two models were stitched.
+pycolmap 4 raises on such a model; pycolmap 3.x loads it and silently drops the
+dangling track (verified: 3.13.0 reads a 191-image model that 4.x refuses).
+Re-run the reconstruction, or rebuild the model so both files come from the same
+run — their timestamps should match. If you must work with such a model without
+rebuilding it, run the subset stage in an environment with `pycolmap<4`.
 
 **3DGS says the camera model is unsupported.**
 You trained on `<SCENE>` instead of `<SCENE>/3dgs`. The subset step exists to

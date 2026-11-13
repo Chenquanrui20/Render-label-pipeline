@@ -57,7 +57,7 @@ summary.md          summarize.py 从上面几个文件生成的汇总表
 ## 图册与演示视频
 
 `run_demo.sh` 只产出数据与数字。两个可选的呈现脚本在同一份 `work/` 上生成
-可直接查看的图册和一段约 55 秒的演示视频：
+可直接查看的图册和一段约 40–45 秒的演示视频：
 
 ```bash
 RENDERS=/path/to/scene/3dgs/renders   # YCBV: /path/to/scene/3dgs_renders
@@ -71,34 +71,59 @@ python3 examples/visualize.py --format charuco \
     --annotations work/seed.json work/selected.json \
     --out work/gallery
 
-# 演示视频（参数相同；--errors-png 把误差直方图嵌进结果卡）
+# 演示视频（纯过程展示，不报精度结果）
 python3 examples/make_demo_video.py --format charuco \
     --renders "$RENDERS" --labels "$LABELS" \
     --images "$SCENE/images" --sparse "$SCENE/sparse/0" \
     --selection work/selection.json --points3d work/labels/points3d.csv \
     --annotations work/seed.json work/selected.json \
-    --eval work/eval.json --errors-png work/gallery/errors.png \
-    --title "ArUco · ChArUco 序列" --out work/gallery/demo.mp4
+    --out work/gallery/demo.mp4
 ```
 
 `visualize.py` 生成：
 
-* `overlays/*.png`：种子帧、选中帧、若干留出帧、最差留出帧的投影叠加
-  （绿圈＝第 07 步投影标签，黄色十字＝数据集参考标签，红点＝点击），
-  右上角带放大窗；
+* `overlays/*.png`：种子帧、选中帧、若干留出帧的投影叠加，右上角带放大窗
+  （绿圈＝第 07 步投影标签，灰色空心圈＝该帧被遮挡/无参考标签，黄色十字＝
+  数据集参考标签，红点＝点击）。留出帧只取“标签一致度在序列中位数以内”的
+  帧——参考标签本身漂移的片段（YCBV 光流标签在段尾可达 ~7 px）不进图册，
+  避免把参考漂移误读成方法误差；评测数字仍用全部留出帧；
 * `selection.png`：左＝相机中心的 PCA 平面，右＝从 X0 看出去的射线极坐标；
 * `errors.png`：随机选帧的中位/均值分布，红线是本方法；
 * `per_point.png`：逐控制点误差（中位＋均值）；
 * `report.html`：一页图册；同目录有 `demo.mp4` 时会自动内嵌。
 
-`make_demo_video.py` 生成 1280×720 / 30 fps 的视频，五段：
-01 稀疏重建点云旋转 → 02 真实图与 3DGS 渲染图擦除对比 → 03 冷启动选帧动画
-（种子对、X0、N_sat、贪心选中）→ 04 选中帧点击与三维交会束 → 05 投影到全部
-渲染帧，最后是结果卡。屏幕上的数字全部从该次运行的
-`selection.json` / `eval.json` / `points3d.csv` 读出，没有手写常数。
+`make_demo_video.py` 生成 1280×720 / 30 fps 的视频，全英文，五段：
+01 稀疏重建点云旋转 → 02 真实图与 3DGS 渲染图擦除对比（只放一段、擦除放慢）
+→ 03 冷启动选帧动画（种子对、X0、N_sat、贪心选中）→ 04 选中帧点击与三维
+交会束 → 05 投影到全部渲染帧。**视频只演示过程，末尾不报精度结果**——误差
+数字在 `eval.json`、`summary.md` 和图册里。屏幕上的数字（N_sat 等）从该次
+运行的 `selection.json` / `points3d.csv` 读出，没有手写常数。
+
+为了让演示只承担“展示”职责：第 04/05 段不画三角形残差 >5 px 的点
+（两视图交会出的坏点），第 05 段只放“标签一致度接近序列中位数”的一整段
+连续帧，被遮挡/无参考标签的点画成灰色空心圈而不是绿圈——可见与不可见
+一眼可分。这些取舍只作用于演示，`eval.json` 的评测口径不变。
+
+绿色/灰色标记可以按真实遮挡来画：`examples/render_visibility.py` 把每帧的
+高斯泼溅投影到像平面（EWA 协方差 + 3σ），点在某个不透明高斯后面且
+`z_front < z_pt*(1-tau)` 时判为被遮挡，输出
+`{帧名: {点名: {"vis": bool, ...}}}`。`make_demo_video.py --visibility
+work/visibility.json` 读它；不给时退回按参考标签判断。渲染器的
+`expected_invdepth` 不能用（它沿整条射线累加期望逆深度，实测只有真实深度
+的 ~0.5 倍）。用法：
+
+```bash
+python3 examples/render_visibility.py "$SCENE" \
+    --subdir "" --renders "$RENDERS" --points3d work/labels/points3d.csv \
+    --annotations work/seed.json work/selected.json \
+    --out work/visibility.json
+```
 
 两套 demo 的成品在 `examples/<demo>/work/gallery/`（`report.html` 与
-`demo.mp4`）；`work/` 不入库，按上面的命令可重生成。
+`demo.mp4`）；`work/` 不入库，按上面的命令可重生成。仓库另外带了两段
+YCBV 场景的演示视频（`docs/media/demo_ycbv_1.mp4`、`demo_ycbv_2.mp4`，均
+1280×720 / 30 fps），封面与生成命令见主 README 的 Demo videos 一节和
+[docs/08_usage.md](../docs/08_usage.md)。
 
 ## 指标怎么读
 

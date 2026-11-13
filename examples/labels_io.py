@@ -62,6 +62,8 @@ def load_ycbv(csv_path):
 def load(fmt, source):
     if fmt == "charuco":
         return load_charuco(source)
+    if fmt == "labelme":          # generic labelme point dir, e.g. stage 07 output
+        return load_charuco(source)
     if fmt == "ycbv":
         return load_ycbv(source)
     raise SystemExit("unknown label format %r" % fmt)

@@ -35,8 +35,15 @@ def _load_ann(path):
 
 
 def _scene_of(renders):
-    """Best guess of the scene dir for the printed hint: <scene>/3dgs/renders."""
-    return os.path.dirname(os.path.dirname(os.path.abspath(renders)))
+    """Best guess of the scene dir for the printed hint.
+
+    Handles both <scene>/3dgs/renders (default) and <scene>/renders
+    (``--subdir ""``).
+    """
+    up = os.path.dirname(os.path.abspath(renders))
+    if os.path.basename(up) == "3dgs":
+        up = os.path.dirname(up)
+    return up
 
 
 def _triangulate_annotations(ann, views, by_file, refine=False):

@@ -58,4 +58,8 @@ python3 examples/check_stages.py --scene "$SCENE"
 
 图册与演示视频：`work/gallery/report.html`、`work/gallery/demo.mp4`
 （由 `visualize.py` / `make_demo_video.py` 生成，命令见
-[`../README.md`](../README.md#图册与演示视频)）。
+[`../README.md`](../README.md#图册与演示视频)）。叠加图里绿圈＝当前帧可见的
+投影标签，灰色空心圈＝被遮挡/无参考标签的点，黄色十字＝数据集参考标签；
+演示视频的投影段只放标签一致度接近序列中位数的一整段连续帧。ArUco 演示
+视频的放大窗不标点名（15 个点挤在小板上，跟随画面移动的字样会显得跳），
+YCBV 的保留点名。

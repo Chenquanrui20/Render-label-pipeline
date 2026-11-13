@@ -2,11 +2,12 @@
 
 Produces, under `--out` (a gallery directory):
 
-    overlays/       the seed frames, the selected frames, an evenly spaced
-                    sample of held-out frames, and the worst held-out frame.
-                    Green = the projected label written by stage 07,
-                    yellow cross = the dataset's own label on that render,
-                    red dot = a click used for triangulation.
+    overlays/       the seed frames, the selected frames, and an evenly spaced
+                    sample of held-out frames whose label agreement is at or
+                    below the sequence median (where the reference label is
+                    reliable).  Green = the projected label written by stage
+                    07, grey = occluded / not labelled, yellow cross = the
+                    dataset's own label on that render, red dot = a click.
     selection.png   camera centres (PGA projection), selected frames numbered;
                     the angular span, N_sat and theta_max in the caption.
     errors.png      random-baseline trial distributions vs ours (median/mean).
@@ -98,13 +99,21 @@ def _place_labels(img, items, fs, color):
 
 
 def _draw_view(img, view, X, names, scale, origin=(0, 0), ref=None, clicks=None,
-               header="", sub="", font_scale=None, legend=True, draw_names=True):
-    """Draw projected labels (green), reference labels (yellow), clicks (red).
+               header="", sub="", font_scale=None, legend=True, draw_names=True,
+               vis=None):
+    """Draw projected labels (green), occluded points (grey), reference labels
+    (yellow crosses) and clicks (red).
+
+    ``vis`` is the set of points visible in this frame; points outside it are
+    drawn as hollow grey circles instead of green crosses.  When ``vis`` is
+    None and ``ref`` is given, the reference label doubles as the visible set.
 
     Image coordinates are ``(uv - origin) * scale``: origin lets the same
     routine draw a crop (the zoom inset) without re-projecting.
     """
     ox, oy = origin
+    if vis is None and ref:
+        vis = set(ref.keys())
     uv, ok = G.project_points(X, view)
     inside = (ok & np.isfinite(uv[:, 0]) & np.isfinite(uv[:, 1]) &
               (uv[:, 0] >= 0) & (uv[:, 0] <= view["W"] - 1) &
@@ -129,6 +138,9 @@ def _draw_view(img, view, X, names, scale, origin=(0, 0), ref=None, clicks=None,
         if not inside[i]:
             continue
         x, y = int(round(uv[i, 0])), int(round(uv[i, 1]))
+        if vis is not None and n not in vis:
+            cv2.circle(img, (x, y), 4, GRAY, 1, cv2.LINE_AA)
+            continue
         cv2.circle(img, (x, y), 5, GREEN, 2, cv2.LINE_AA)
         cv2.line(img, (x - 3, y), (x + 3, y), GREEN, 1, cv2.LINE_AA)
         cv2.line(img, (x, y - 3), (x, y + 3), GREEN, 1, cv2.LINE_AA)
@@ -141,12 +153,13 @@ def _draw_view(img, view, X, names, scale, origin=(0, 0), ref=None, clicks=None,
     if sub:
         _text(img, sub, (10, 48), 0.52, (220, 220, 220), 1)
     if legend:
-        _text(img, "green o projected label   yellow + dataset label   red . click",
-              (10, img.shape[0] - 12), 0.5, GRAY, 1)
+        _text(img, "green o visible label   grey o occluded / not labelled"
+              "   yellow + dataset label   red . click",
+              (10, img.shape[0] - 12), 0.46, GRAY, 1)
 
 
 def _paste_zoom(canvas, full, view, X, names, ref, clicks, frac=0.46,
-                max_inset=620):
+                max_inset=620, vis=None, draw_names=True):
     """Crop around the drawn points, enlarge, and paste it top-right."""
     uv, ok = G.project_points(X, view)
     pts = [uv[i] for i in range(len(names)) if ok[i] and np.isfinite(uv[i]).all()]
@@ -170,7 +183,8 @@ def _paste_zoom(canvas, full, view, X, names, ref, clicks, frac=0.46,
         tw, th = int(round(crop.shape[1] * s)), int(round(crop.shape[0] * s))
     zoom = cv2.resize(crop, (tw, th), interpolation=cv2.INTER_CUBIC)
     _draw_view(zoom, view, X, names, s, origin=(x0, y0), ref=ref,
-               clicks=clicks, font_scale=0.45, legend=False)
+               clicks=clicks, font_scale=0.45, legend=False, vis=vis,
+               draw_names=draw_names)
     cv2.rectangle(zoom, (0, 0), (tw - 1, th - 1), (255, 255, 255), 1)
     _text(zoom, "zoom x%.1f" % s, (6, th - 8), 0.42, GRAY, 1)
     px = canvas.shape[1] - tw - 12
@@ -211,22 +225,22 @@ def write_overlays(views, labels, clicks_by_file, sel, X, names, out_dir,
     chosen = list(sel.get("selected_files") or [])
     ann = set(seed) | set(chosen)
 
-    # held-out frames: evenly spaced + the worst frame (median error)
+    # held-out frames: evenly spaced, drawn from the better half by label
+    # agreement -- this is a gallery, so a drifted reference frame would only
+    # show the reference's error, not the pipeline's output.
     held = [v for v in views if v["render_file"] not in ann]
-    errs = []
+    scored = []
     for v in held:
         m, _a, n = _frame_errors(v, X, names, labels.get(_stem(v)))
-        errs.append((m, n, v))
-    candidates = [(m, v) for m, n, v in errs if n > 0 and np.isfinite(m)]
+        if n > 0 and np.isfinite(m):
+            scored.append((m, v))
     sample = []
-    if candidates:
-        k = min(6, len(held))
-        step = max(1, len(held) // k)
-        picked = {v["render_file"] for v in held[::step][:k]}
-        sample = [v for v in held if v["render_file"] in picked]
-        worst = max(candidates, key=lambda t: t[0])[1]
-        if worst["render_file"] not in {v["render_file"] for v in sample}:
-            sample.append(worst)
+    if scored:
+        cut = float(np.median([m for m, _v in scored]))
+        good = [v for m, v in scored if m <= cut]
+        k = min(8, len(good))
+        step = max(1, len(good) // k)
+        sample = good[::step][:k]
 
     plan = ([(f, "seed") for f in seed] +
             [(f, "selected") for f in chosen] +
@@ -254,7 +268,8 @@ def write_overlays(views, labels, clicks_by_file, sel, X, names, out_dir,
         hdr = "%s  [%s]" % (v["render_file"], role)
         _draw_view(img, v, X, names, s, ref=ref, clicks=clicks,
                    header=hdr, sub=sub, draw_names=False)
-        _paste_zoom(img, full, v, X, names, ref, clicks)
+        _paste_zoom(img, full, v, X, names, ref, clicks,
+                    vis=set(ref) if ref else None)
         name = "%s_%s.png" % (stem, role)
         cv2.imwrite(os.path.join(out_dir, name), img)
         wrote.append(dict(file=name, stem=stem, role=f, role_label=role,
@@ -502,10 +517,10 @@ def write_html(out_dir, run_name, sel, ev, overlays, has_video):
     video_html = ('<h2>Video</h2><video controls width="100%" '
                   'src="demo.mp4"></video>') if has_video else ""
     html = """<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8">
+<html lang="en"><head><meta charset="utf-8">
 <title>demo — %(name)s</title>
 <style>
-body{font-family:system-ui,-apple-system,"Noto Sans CJK SC",sans-serif;
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
      max-width:1180px;margin:2rem auto;padding:0 1rem;color:#222;
      background:#fdfcfb;line-height:1.55}
 h1{font-size:1.5rem;margin-bottom:.2rem} h2{margin-top:2rem;font-size:1.15rem}
@@ -523,22 +538,26 @@ figcaption{font-size:.78rem;color:#555;padding:.45rem .6rem}
 code{font-size:.85em}
 </style></head><body>
 <h1>%(name)s demo — stages 04–07 on a 3DGS render set</h1>
-<p class="note">点击（第 04/06 步）是从数据集已有的**渲染域标签**复制的，
-其余步骤为流水线本体。这里的像素误差只在同一渲染域内可比。绿色圈是第 07 步
-写出的投影标签；黄色十字是数据集在同一张渲染图上的参考标签；红点是参与交会
-的点击。标签按纯几何投影写出，未做遮挡判断（YCBV 的自遮挡点上也可能有标签）。</p>
+<p class="note">The clicks (stages 04/06) are copied from the dataset's
+existing <b>render-domain labels</b>; every other step is the pipeline itself.
+Pixel errors are comparable only inside the same render domain. Green circles
+are the labels written by stage 07 (visible in the reference visibility set);
+grey circles are points that are occluded or not labelled in that frame;
+yellow crosses are the dataset's reference labels; red dots are the clicks
+used for triangulation. Labels are written by pure geometric projection --
+occlusion masking is not part of the demo.</p>
 <table>%(table)s</table>
-<h2>选帧几何</h2>
+<h2>View-selection geometry</h2>
 <p><a href="selection.png"><img src="selection.png" style="width:100%%"></a></p>
-<h2>结果分布</h2>
+<h2>Error distributions</h2>
 <p><a href="errors.png"><img src="errors.png" style="width:100%%"></a></p>
 <p><a href="per_point.png"><img src="per_point.png" style="width:100%%"></a></p>
 %(video)s
-<h2>渲染图上的标签</h2>
+<h2>Labels on rendered frames</h2>
 <div class="grid">%(cards)s</div>
-<p class="note">完整数值：<a href="../summary.md">summary.md</a> ·
-评测 JSON：<a href="../eval.json">eval.json</a> ·
-第 07 步输出：<a href="../labels/">labels/</a></p>
+<p class="note">Full numbers: <a href="../summary.md">summary.md</a> ·
+evaluation JSON: <a href="../eval.json">eval.json</a> ·
+stage-07 output: <a href="../labels/">labels/</a></p>
 </body></html>
 """ % dict(name=run_name, table=table, cards="\n".join(cards),
            video=video_html)
@@ -557,10 +576,11 @@ def main(argv=None):
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--format", required=True, choices=("charuco", "ycbv"))
+    ap.add_argument("--format", required=True,
+                    choices=("charuco", "ycbv", "labelme"))
     ap.add_argument("--renders", required=True)
     ap.add_argument("--labels", required=True,
-                    help="charuco: labelme dir; ycbv: points_states.csv")
+                    help="charuco/labelme: labelme dir; ycbv: points_states.csv")
     ap.add_argument("--selection", required=True)
     ap.add_argument("--points3d", required=True)
     ap.add_argument("--eval", default=None, help="eval.json (for the figures)")
@@ -590,11 +610,12 @@ def main(argv=None):
     overlays = write_overlays(views, labels, clicks_by_file, sel, X, names,
                               os.path.join(a.out, "overlays"), a.max_side)
 
+    if sel.get("x0") is not None:
+        plot_selection(sel, views, os.path.join(a.out, "selection.png"))
     if a.eval:
         with open(a.eval, encoding="utf-8") as fh:
             ev = json.load(fh)
         print("[figures]")
-        plot_selection(sel, views, os.path.join(a.out, "selection.png"))
         plot_errors(ev, os.path.join(a.out, "errors.png"))
         plot_per_point(ev, os.path.join(a.out, "per_point.png"))
     else:
