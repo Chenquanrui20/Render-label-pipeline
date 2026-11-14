@@ -14,9 +14,18 @@ thousands of images.
 ## Demo videos
 
 Two YCBV-style orbit captures, six control points each, labelled end to end by
-the pipeline:
+the pipeline.  Both play inline below (GitHub video attachments; the committed
+MP4s are in [`docs/media/`](docs/media/) if you want the files).
 
-| demo | rendered frames | annotated views | video |
+Demo A — 191 rendered frames, 2 seed + 4 selected views:
+
+https://github.com/user-attachments/assets/f271266a-34a5-461b-87d7-af099a99f338
+
+Demo B — 204 rendered frames, 2 seed + 4 selected views:
+
+https://github.com/user-attachments/assets/705bac1a-bd90-4f20-88fe-4a677f5dd999
+
+| demo | rendered frames | annotated views | file |
 |---|---|---|---|
 | A | 191 | 2 seed + 4 selected | [demo_ycbv_1.mp4](docs/media/demo_ycbv_1.mp4) |
 | B | 204 | 2 seed + 4 selected | [demo_ycbv_2.mp4](docs/media/demo_ycbv_2.mp4) |
